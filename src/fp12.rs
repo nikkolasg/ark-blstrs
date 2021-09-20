@@ -6,6 +6,7 @@ use core::{
     fmt,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
+use std::cell::RefCell;
 
 use ff::Field;
 use rand_core::RngCore;
@@ -255,6 +256,134 @@ impl Fp12 {
         Fp12(blst_fp12 { fp6: [c0.0, c1.0] })
     }
 
+    fn cyclotomic_square(&mut self, x: &Self) {
+        // x=(x0,x1,x2,x3,x4,x5,x6,x7) in E2^6
+        // cyclosquare(x)=(3*x4^2*u + 3*x0^2 - 2*x0,
+        //					3*x2^2*u + 3*x3^2 - 2*x1,
+        //					3*x5^2*u + 3*x1^2 - 2*x2,
+        //					6*x1*x5*u + 2*x3,
+        //					6*x0*x4 + 2*x4,
+        //					6*x2*x3 + 2*x5)
+        let mut t = vec![Fp2::zero(); 9];
+        t[0] = x.c1().c1().square();
+        t[1] = x.c0().c0().square();
+        t[6] = (x.c1().c1() + x.c0().c0()).square() - &t[0] - &t[1]; // 2*x4*x0
+        t[2] = x.c0().c2().square();
+        t[3] = x.c1().c0().square();
+        t[7] = (x.c0().c2() + x.c1().c0()).square() - &t[2] - &t[3]; // 2*x2*x3
+        t[4] = x.c1().c2().square();
+        t[5] = x.c0().c1().square();
+        t[8] = (x.c1().c2() + x.c0().c1()).square() - &t[4] - &t[5]; // 2*x5*x1*u
+        t[8].mul_by_nonresidue();
+
+        t[0].mul_by_nonresidue();
+        t[0] = t[0] + t[1]; // x4^2*u + x0^2
+        t[2].mul_by_nonresidue();
+        t[2] = t[2] + t[3]; // x2^2*u + x3^2
+        t[4].mul_by_nonresidue();
+        t[4] = t[4] + t[5];
+
+        let c0c0 = (t[0] - x.c0().c0()).double() + t[0];
+        let c0c1 = (t[2] - x.c0().c1()).double() + t[2];
+        let c0c2 = (t[4] - x.c0().c2()).double() + t[4];
+
+        let c1c0 = (t[8] + x.c1().c0()).double() + t[8];
+        let c1c1 = (t[6] + x.c1().c1()).double() + t[6];
+        let c1c2 = (t[7] + x.c1().c2()).double() + t[7];
+
+        *self = Fp12::new(Fp6::new(c0c0, c0c1, c0c2), Fp6::new(c1c0, c1c1, c1c2));
+    }
+
+    fn nsquare(&mut self, n: usize) {
+        // TODO find a way to avoid cloning - maybe with RefCell
+        for _ in (0..n) {
+            self.cyclotomic_square(&self.clone())
+        }
+    }
+
+    // ExptHalf set z to x^(t/2) in E12
+    // const t/2 uint64 = 7566188111470821376 // negative
+    fn expt_half(&mut self, x: &Self) {
+        self.cyclotomic_square(x);
+        self.mul_assign(x);
+        self.nsquare(2);
+        self.mul_assign(x);
+        self.nsquare(3);
+        self.mul_assign(x);
+        self.nsquare(9);
+        self.mul_assign(x);
+        self.nsquare(32);
+        self.mul_assign(x);
+        self.nsquare(15);
+        self.conjugate(); // because tAbsVal is negative
+    }
+
+    // Expt set z to x^t in E12 and return z
+    // const t uint64 = 15132376222941642752 // negative
+    fn expt(&mut self, x: &Self) {
+        let mut result = Fp12::zero();
+        result.expt_half(&x);
+        self.cyclotomic_square(&result);
+    }
+    // FrobeniusSquare set z to Frobenius^2(x)
+    // Algorithm 29 from https://eprint.iacr.org/2010/354.pdf (beware typos!)
+    fn frobenius_square(&mut self, x: &Self) {
+        let c0c0 = x.c0().c0();
+        let mut c0c1 = Fp2::zero();
+        let mut c0c2 = Fp2::zero();
+        let mut c1c0 = Fp2::zero();
+        let mut c1c1 = Fp2::zero();
+        let mut c1c2 = Fp2::zero();
+        c0c1.mul_by_nonresidue_2p2(&x.c0().c1());
+        c0c2.mul_by_nonresidue_2p4(&x.c0().c2());
+        c1c0.mul_by_nonresidue_2p1(&x.c1().c0());
+        c1c1.mul_by_nonresidue_2p3(&x.c1().c1());
+        c1c2.mul_by_nonresidue_2p5(&x.c1().c2());
+        *self = Fp12::new(Fp6::new(c0c0, c0c1, c0c2), Fp6::new(c1c0, c1c1, c1c2));
+    }
+
+    // Frobenius set z to Frobenius(x)
+    // Algorithm 28 from https://eprint.iacr.org/2010/354.pdf (beware typos!)
+    fn frobenius(&mut self, x: &Self) {
+        let mut t = vec![Fp2::zero(); 6];
+        // Frobenius acts on fp2 by conjugation
+        t[0].conjugate(&x.c0().c0());
+        t[1].conjugate(&x.c0().c1());
+        t[2].conjugate(&x.c0().c2());
+        t[3].conjugate(&x.c1().c0());
+        t[4].conjugate(&x.c1().c1());
+        t[5].conjugate(&x.c1().c2());
+
+        t[1].mul_by_nonresidue_1p2_self();
+        t[2].mul_by_nonresidue_1p4_self();
+        t[3].mul_by_nonresidue_1p1_self();
+        t[4].mul_by_nonresidue_1p3_self();
+        t[5].mul_by_nonresidue_1p5_self();
+
+        let fp60 = Fp6::new(t[0], t[1], t[2]);
+        let fp61 = Fp6::new(t[3], t[4], t[5]);
+        *self = Fp12::new(fp60, fp61);
+    }
+
+    pub fn is_in_subgroup(&self) -> bool {
+        let mut a = Self::zero();
+        let mut b = Self::zero();
+        // check z^(Phi_k(p)) == 1
+        a.frobenius_square(self);
+        b.frobenius_square(&a);
+        b.mul_assign(self);
+        if a != b {
+            println!("FAILED FIRST TEST");
+            return false;
+        }
+
+        // check z^(p+1-t) == 1
+        a.frobenius(self);
+        b.expt(self);
+        println!("FAILED SECOND TEST?");
+        return a == b;
+    }
+
     pub fn frobenius_map(&mut self, power: usize) {
         if power > 0 && power < 4 {
             unsafe { blst_fp12_frobenius_map(&mut self.0, &self.0, power) }
@@ -357,7 +486,6 @@ impl Fp12Compressed {
         if c.is_cyc() {
             return Some(c);
         }
-
         None
     }
 }
@@ -715,6 +843,18 @@ mod tests {
                 assert_eq!(a, b, "{}", i);
             }
         }
+    }
+
+    #[test]
+    fn fp12_subgroup() {
+        let mut rng = XorShiftRng::from_seed([
+            0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
+            0xbc, 0xe5,
+        ]);
+        let p = G1Projective::random(&mut rng).to_affine();
+        let q = G2Projective::random(&mut rng).to_affine();
+        let a: Fp12 = crate::pairing(&p, &q).into();
+        assert!(a.is_in_subgroup());
     }
 
     #[test]
