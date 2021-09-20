@@ -309,6 +309,7 @@ impl Fp2 {
                 ],
             }),
         );
+        self.mul_assign(&non_residue_1p1);
     }
 
     pub fn mul_by_nonresidue_1p2_self(&mut self) {

@@ -373,14 +373,12 @@ impl Fp12 {
         b.frobenius_square(&a);
         b.mul_assign(self);
         if a != b {
-            println!("FAILED FIRST TEST");
             return false;
         }
 
         // check z^(p+1-t) == 1
         a.frobenius(self);
         b.expt(self);
-        println!("FAILED SECOND TEST?");
         return a == b;
     }
 
