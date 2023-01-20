@@ -1,6 +1,7 @@
 //! This module provides an implementation of the BLS12-381 base field `GF(p)`
 //! where `p = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab`
 
+use ark_serialize::Read;
 use blst::*;
 
 use core::{
@@ -9,6 +10,7 @@ use core::{
 };
 use ff::Field;
 use rand_core::RngCore;
+use std::ops::{Div, DivAssign};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::fp2::Fp2;
@@ -433,11 +435,11 @@ impl Add<&Fp> for &Fp {
     }
 }
 
-impl Mul<&Fp> for &Fp {
+impl<'a> Mul<&'a Fp> for &Fp {
     type Output = Fp;
 
     #[inline]
-    fn mul(self, rhs: &Fp) -> Fp {
+    fn mul(self, rhs: &'a Fp) -> Fp {
         let mut out = *self;
         out *= rhs;
         out
@@ -501,6 +503,363 @@ fn is_valid_u64(le_bytes: &[u64; 6]) -> bool {
 const NUM_BITS: u32 = 381;
 /// The number of bits we should "shave" from a randomly sampled reputation.
 const REPR_SHAVE_BITS: usize = 384 - NUM_BITS as usize;
+
+/// ------------------- ARKWORK IMPLEMENTATION
+
+impl From<bool> for Fp {
+    fn from(bit: bool) -> Self {
+        if bit {
+            R
+        } else {
+            ZERO
+        }
+    }
+}
+
+macro_rules! impl_from {
+    ($($t:ty)*) => ($(
+        impl From<$t> for Fp {
+            fn from(val: $t) -> Self {
+                Fp::from(u64::from(val))
+            }
+        }
+    )*)
+}
+
+impl_from!(u8);
+impl_from!(u16);
+impl_from!(u32);
+
+impl From<u128> for Fp {
+    fn from(val: u128) -> Self {
+        let mut repr = [0u8; 48];
+        repr[..8].copy_from_slice(&val.to_le_bytes());
+        Self::from_bytes_le(&repr).unwrap()
+    }
+}
+
+impl Div<&Fp> for &Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn div(self, rhs: &Fp) -> Fp {
+        let mut out = *self;
+        out /= rhs;
+        out
+    }
+}
+
+impl<'a, 'b> MulAssign<&'b Fp> for &'a Fp {
+    #[inline]
+    fn mul_assign(&mut self, rhs: &'b Fp) {
+        let mut out = *self;
+        out *= rhs;
+    }
+}
+
+impl<'a> core::iter::Product<&'a Fp> for Fp {
+    fn product<I: Iterator<Item = &'a Fp>>(iter: I) -> Self {
+        iter.fold(Fp::one(), core::ops::Mul::mul)
+    }
+}
+impl core::iter::Product<Fp> for Fp {
+    fn product<I: Iterator<Item = Fp>>(iter: I) -> Self {
+        iter.fold(Fp::one(), core::ops::Mul::mul)
+    }
+}
+
+impl<'b> Mul<&'b mut Fp> for Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn mul(self, rhs: &'b mut Fp) -> Fp {
+        self * rhs
+    }
+}
+impl<'b> MulAssign<&'b mut Fp> for Fp {
+    #[inline]
+    fn mul_assign(&mut self, rhs: &'b mut Fp) {
+        let mut out = *self;
+        out *= rhs;
+    }
+}
+
+impl core::iter::Sum<Fp> for Fp {
+    fn sum<I: Iterator<Item = Fp>>(iter: I) -> Self {
+        iter.fold(Fp::zero(), core::ops::Add::add)
+    }
+}
+
+impl<'a> core::iter::Sum<&'a Fp> for Fp {
+    fn sum<I: Iterator<Item = &'a Fp>>(iter: I) -> Self {
+        iter.fold(Fp::zero(), core::ops::Add::add)
+    }
+}
+
+impl<'a> DivAssign<&'a Fp> for Fp {
+    #[inline]
+    fn div_assign(&mut self, rhs: &'a Fp) {
+        // XXX Can panic
+        self.mul_assign(&rhs.invert().unwrap());
+    }
+}
+impl<'a> DivAssign<&'a mut Fp> for Fp {
+    #[inline]
+    fn div_assign(&mut self, rhs: &'a mut Fp) {
+        // XXX Can panic
+        self.mul_assign(&rhs.invert().unwrap());
+    }
+}
+
+impl DivAssign<Fp> for Fp {
+    #[inline]
+    fn div_assign(&mut self, rhs: Fp) {
+        // XXX Can panic
+        self.mul_assign(&rhs.invert().unwrap());
+    }
+}
+
+impl Div<Fp> for Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn div(self, rhs: Fp) -> Fp {
+        let mut out = self;
+        out /= rhs;
+        out
+    }
+}
+
+impl<'a> SubAssign<&'a mut Fp> for Fp {
+    #[inline]
+    fn sub_assign(&mut self, rhs: &'a mut Fp) {
+        self.add_assign(&rhs.neg());
+    }
+}
+impl<'a> AddAssign<&'a mut Fp> for Fp {
+    #[inline]
+    fn add_assign(&mut self, rhs: &'a mut Fp) {
+        self.add_assign(&rhs.neg());
+    }
+}
+
+impl<'a> Div<&'a mut Fp> for Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn div(self, rhs: &'a mut Fp) -> Fp {
+        self / rhs
+    }
+}
+
+impl<'a> Sub<&'a mut Fp> for Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn sub(self, rhs: &'a mut Fp) -> Fp {
+        self - rhs
+    }
+}
+
+impl<'a> Add<&'a mut Fp> for Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn add(self, rhs: &'a mut Fp) -> Fp {
+        self + rhs
+    }
+}
+
+impl<'a> Div<&'a Fp> for Fp {
+    type Output = Fp;
+
+    #[inline]
+    fn div(self, rhs: &'a Fp) -> Fp {
+        self / rhs
+    }
+}
+
+impl ark_serialize::CanonicalDeserialize for Fp {
+    fn deserialize_with_mode<R: Read>(
+        reader: R,
+        compress: ark_serialize::Compress,
+        validate: ark_serialize::Validate,
+    ) -> Result<Self, ark_serialize::SerializationError> {
+        let slice = [0u8; 48];
+        reader.read(&mut slice[..])?;
+        Option::from(Self::from_bytes_le(&slice))
+            .ok_or(ark_serialize::SerializationError::InvalidData)
+    }
+}
+
+impl ark_serialize::CanonicalDeserializeWithFlags for Fp {
+    fn deserialize_with_flags<R: Read, F: ark_serialize::Flags>(
+        reader: R,
+    ) -> Result<(Self, F), ark_serialize::SerializationError> {
+        let slice = [0u8; 48];
+        reader.read(&mut slice[..])?;
+        Option::from(Self::from_bytes_le(&slice).map(|x| (x, F::default())))
+            .ok_or(ark_serialize::SerializationError::InvalidData)
+    }
+}
+
+impl ark_serialize::Valid for Fp {
+    fn check(&self) -> Result<(), ark_serialize::SerializationError> {
+        match is_valid(&self.to_bytes_le()) {
+            true => Ok(()),
+            false => Err(ark_serialize::SerializationError::InvalidData),
+        }
+    }
+}
+
+impl ark_serialize::CanonicalSerialize for Fp {
+    fn serialize_with_mode<W: ark_serialize::Write>(
+        &self,
+        writer: W,
+        compress: ark_serialize::Compress,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        writer.write_all(self.to_bytes_le().as_slice())?;
+        Ok(())
+    }
+
+    fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
+        48
+    }
+}
+impl ark_serialize::CanonicalSerializeWithFlags for Fp {
+    fn serialize_with_flags<W: ark_serialize::Write, F: ark_serialize::Flags>(
+        &self,
+        writer: W,
+        _flags: F,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        let mut bytes = self.to_bytes_le();
+        writer.write_all(bytes.as_slice())?;
+        Ok(())
+    }
+
+    fn serialized_size_with_flags<F: ark_serialize::Flags>(&self) -> usize {
+        todo!()
+    }
+}
+
+impl std::hash::Hash for Fp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.to_bytes_le().hash(state);
+    }
+}
+
+impl ark_ff::One for Fp {
+    fn one() -> Self {
+        R
+    }
+}
+
+impl ark_ff::Zero for Fp {
+    fn zero() -> Self {
+        ZERO
+    }
+
+    fn is_zero(&self) -> bool {
+        <Self as Field>::is_zero(&self).into()
+    }
+}
+
+impl zeroize::Zeroize for Fp {
+    fn zeroize(&mut self) {
+        *self = ZERO;
+    }
+}
+
+impl ark_ff::UniformRand for Fp {
+    fn rand<R: ark_std::rand::RngCore + ?Sized>(rng: &mut R) -> Self {
+        let mut bytes = [0u8; 48];
+        rng.fill_bytes(&mut bytes);
+        Self::from_bytes_le(&bytes).unwrap()
+    }
+}
+
+impl ark_ff::Field for Fp {
+    type BasePrimeField = Self;
+    type BasePrimeFieldIter = std::iter::Once<Self::BasePrimeField>;
+
+    const SQRT_PRECOMP: Option<ark_ff::SqrtPrecomputation<Self>> = None;
+    const ZERO: Self = ZERO;
+    const ONE: Self = R;
+    fn characteristic() -> &'static [u64] {
+        &MODULUS
+    }
+
+    fn extension_degree() -> u64 {
+        1
+    }
+
+    fn to_base_prime_field_elements(&self) -> Self::BasePrimeFieldIter {
+        std::iter::once(*self)
+    }
+
+    fn from_base_prime_field_elems(elems: &[Self::BasePrimeField]) -> Option<Self> {
+        Some(elems[0])
+    }
+
+    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
+        elem
+    }
+
+    fn double(&self) -> Self {
+        <Self as Field>::double(&self)
+    }
+
+    fn double_in_place(&mut self) -> &mut Self {
+        *self = <Self as Field>::double(&self);
+        self
+    }
+
+    fn neg_in_place(&mut self) -> &mut Self {
+        *self = self.neg();
+        self
+    }
+    fn from_random_bytes_with_flags<F: ark_serialize::Flags>(bytes: &[u8]) -> Option<(Self, F)> {
+        let mut slice = [0u64; 6];
+        slice.copy_from_slice(bytes);
+        // Mask away the unused most-significant bits.
+        slice[5] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
+
+        Fp::from_u64s_le(&slice).into().map(|f| (f, F::default()))
+    }
+
+    fn legendre(&self) -> ark_ff::LegendreSymbol {
+        if self.is_zero() {
+            ark_ff::LegendreSymbol::Zero
+        }
+
+        match self.is_quad_res().into() {
+            0 => ark_ff::LegendreSymbol::QuadraticNonResidue,
+            1 => ark_ff::LegendreSymbol::QuadraticResidue,
+        }
+    }
+
+    fn square(&self) -> Self {
+        <Self as Field>::square(&self)
+    }
+
+    fn square_in_place(&mut self) -> &mut Self {
+        *self = self.square();
+    }
+
+    fn inverse(&self) -> Option<Self> {
+        self.invert().into()
+    }
+
+    fn inverse_in_place(&mut self) -> Option<&mut Self> {
+        self.inverse().map(|inv| {
+            *self = inv;
+            self
+        })
+    }
+
+    // no effect in a prime field
+    fn frobenius_map_in_place(&mut self, power: usize) {}
+}
 
 impl Field for Fp {
     fn random(mut rng: impl RngCore) -> Self {
