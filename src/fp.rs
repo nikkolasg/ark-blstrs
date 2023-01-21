@@ -818,23 +818,33 @@ impl ark_ff::Field for Fp {
         *self = self.neg();
         self
     }
+
+    // TODO test that
     fn from_random_bytes_with_flags<F: ark_serialize::Flags>(bytes: &[u8]) -> Option<(Self, F)> {
+        let len = bytes.len();
+        if len < 48 {
+            return None;
+        }
         let mut slice = [0u64; 6];
-        slice.copy_from_slice(bytes);
+        unsafe {
+            let src_ptr = bytes.as_ptr();
+            let dst_ptr = slice.as_mut_ptr() as *mut u8;
+            std::ptr::copy(src_ptr, dst_ptr, len)
+        };
         // Mask away the unused most-significant bits.
         slice[5] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
 
-        Fp::from_u64s_le(&slice).into().map(|f| (f, F::default()))
+        Fp::from_u64s_le(&slice).map(|f| (f, F::default())).into()
     }
 
     fn legendre(&self) -> ark_ff::LegendreSymbol {
-        if self.is_zero() {
-            ark_ff::LegendreSymbol::Zero
+        if bool::from(self.is_zero()) {
+            return ark_ff::LegendreSymbol::Zero;
         }
 
-        match self.is_quad_res().into() {
-            0 => ark_ff::LegendreSymbol::QuadraticNonResidue,
-            1 => ark_ff::LegendreSymbol::QuadraticResidue,
+        match bool::from(self.is_quad_res()) {
+            false => ark_ff::LegendreSymbol::QuadraticNonResidue,
+            true => ark_ff::LegendreSymbol::QuadraticResidue,
         }
     }
 
@@ -843,7 +853,8 @@ impl ark_ff::Field for Fp {
     }
 
     fn square_in_place(&mut self) -> &mut Self {
-        *self = self.square();
+        *self = <Self as Field>::square(&self);
+        self
     }
 
     fn inverse(&self) -> Option<Self> {
