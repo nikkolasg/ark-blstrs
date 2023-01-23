@@ -101,6 +101,21 @@ fn u64_to_u32(limbs: &[u64]) -> Vec<u32> {
         .collect()
 }
 
+// TODO TEST
+pub(crate) fn slice_to_limbs<const N: usize>(vec: &[u8]) -> Option<[u64; N]> {
+    let len = vec.len();
+    if len < 8 * N {
+        return None;
+    }
+    let mut slice = [0u64; N];
+    unsafe {
+        let src_ptr = vec.as_ptr();
+        let dst_ptr = slice.as_mut_ptr() as *mut u8;
+        std::ptr::copy(src_ptr, dst_ptr, len)
+    };
+    Some(slice)
+}
+
 #[test]
 fn bls12_engine_tests() {
     crate::tests::engine::engine_tests::<Bls12>();

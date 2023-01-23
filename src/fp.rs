@@ -1,19 +1,23 @@
 //! This module provides an implementation of the BLS12-381 base field `GF(p)`
 //! where `p = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab`
 
+use ark_ff::PrimeField;
 use ark_serialize::Read;
 use blst::*;
-
 use core::{
     cmp, fmt,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 use ff::Field;
 use rand_core::RngCore;
-use std::ops::{Div, DivAssign};
+use std::{
+    ops::{Div, DivAssign},
+    str::FromStr,
+    sync::Arc,
+};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
-use crate::fp2::Fp2;
+use crate::{fp2::Fp2, slice_to_limbs};
 
 // Little-endian non-Montgomery form.
 #[allow(dead_code)]
@@ -529,6 +533,11 @@ macro_rules! impl_from {
 impl_from!(u8);
 impl_from!(u16);
 impl_from!(u32);
+impl From<i32> for Fp {
+    fn from(val: i32) -> Self {
+        Fp::from(val as u32)
+    }
+}
 
 impl From<u128> for Fp {
     fn from(val: u128) -> Self {
@@ -778,6 +787,89 @@ impl ark_ff::UniformRand for Fp {
     }
 }
 
+impl From<num_bigint::BigUint> for Fp {
+    fn from(x: num_bigint::BigUint) -> Self {
+        Self::from_raw_unchecked(slice_to_limbs(x.to_bytes_le().as_slice()).unwrap())
+    }
+}
+
+impl From<ark_ff::BigInt<6>> for Fp {
+    fn from(x: ark_ff::BigInt<6>) -> Self {
+        Self::from_raw_unchecked(x.0)
+    }
+}
+
+impl From<ark_bls12_381::Fq> for Fp {
+    fn from(x: ark_bls12_381::Fq) -> Self {
+        Self::from_raw_unchecked(x.into_bigint().0)
+    }
+}
+
+impl FromStr for Fp {
+    type Err = <ark_bls12_381::Fq as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ark_bls12_381::Fq::from_str(s).map(|x| Self::from(x))
+    }
+}
+
+impl Into<ark_ff::BigInt<6>> for Fp {
+    fn into(self) -> ark_ff::BigInt<6> {
+        ark_ff::BigInt::<6>(self.0.l)
+    }
+}
+
+impl Into<num_bigint::BigUint> for Fp {
+    fn into(self) -> num_bigint::BigUint {
+        num_bigint::BigUint::from_bytes_le(&self.to_bytes_le())
+    }
+}
+
+impl ark_ff::FftField for Fp {
+    const GENERATOR: Self = R;
+    const TWO_ADICITY: u32 = <ark_bls12_381::Fq as ark_ff::FftField>::TWO_ADICITY;
+    const TWO_ADIC_ROOT_OF_UNITY: Self =
+        <ark_bls12_381::Fq as ark_ff::FftField>::TWO_ADIC_ROOT_OF_UNITY;
+    const SMALL_SUBGROUP_BASE: Option<u32> =
+        <ark_bls12_381::Fq as ark_ff::FftField>::SMALL_SUBGROUP_BASE;
+    const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> =
+        <ark_bls12_381::Fq as ark_ff::FftField>::SMALL_SUBGROUP_BASE_ADICITY;
+    const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Self> =
+        <ark_bls12_381::Fq as ark_ff::FftField>::LARGE_SUBGROUP_ROOT_OF_UNITY;
+}
+
+use ark_ff::BigInteger;
+
+impl ark_ff::PrimeField for Fp {
+    type BigInt = ark_ff::BigInt<6>;
+    const MODULUS: Self::BigInt = <ark_bls12_381::Fq as ark_ff::PrimeField>::MODULUS;
+    const MODULUS_MINUS_ONE_DIV_TWO: Self::BigInt =
+        <ark_bls12_381::Fq as ark_ff::PrimeField>::MODULUS_MINUS_ONE_DIV_TWO;
+    const MODULUS_BIT_SIZE: u32 = <ark_bls12_381::Fq as ark_ff::PrimeField>::MODULUS_BIT_SIZE;
+
+    const TRACE: Self::BigInt = <ark_bls12_381::Fq as ark_ff::PrimeField>::TRACE;
+
+    const TRACE_MINUS_ONE_DIV_TWO: Self::BigInt =
+        <ark_bls12_381::Fq as ark_ff::PrimeField>::TRACE_MINUS_ONE_DIV_TWO;
+
+    fn from_bigint(repr: Self::BigInt) -> Option<Self> {
+        let vec = repr.to_bytes_le();
+        let slice = [0u8; 48];
+        slice.copy_from_slice(vec.as_slice());
+        Self::from_bytes_le(&slice).into()
+    }
+
+    fn into_bigint(self) -> Self::BigInt {
+        ark_ff::BigInt::<6>(self.0.l)
+    }
+}
+
+//impl ark_ff:PrimeField for Fp {
+//    type BigInt = ark_ff::BigInt<6>;
+//
+//    const MODULUS: Self::BigInt = ark_bls12_381::MODULUS;
+//}
+//
 impl ark_ff::Field for Fp {
     type BasePrimeField = Self;
     type BasePrimeFieldIter = std::iter::Once<Self::BasePrimeField>;
@@ -821,20 +913,15 @@ impl ark_ff::Field for Fp {
 
     // TODO test that
     fn from_random_bytes_with_flags<F: ark_serialize::Flags>(bytes: &[u8]) -> Option<(Self, F)> {
-        let len = bytes.len();
-        if len < 48 {
-            return None;
-        }
-        let mut slice = [0u64; 6];
-        unsafe {
-            let src_ptr = bytes.as_ptr();
-            let dst_ptr = slice.as_mut_ptr() as *mut u8;
-            std::ptr::copy(src_ptr, dst_ptr, len)
-        };
-        // Mask away the unused most-significant bits.
-        slice[5] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
-
-        Fp::from_u64s_le(&slice).map(|f| (f, F::default())).into()
+        slice_to_limbs(bytes)
+            .map(|slice| {
+                // Mask away the unused most-significant bits.
+                slice[5] &= 0xffffffffffffffff >> REPR_SHAVE_BITS;
+                slice
+            })
+            .and_then(|slice| Option::from(Fp::from_u64s_le(&slice)))
+            .map(|f| (f, F::default()))
+            .into()
     }
 
     fn legendre(&self) -> ark_ff::LegendreSymbol {
