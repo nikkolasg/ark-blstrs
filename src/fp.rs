@@ -64,7 +64,7 @@ const R2: Fp = Fp(blst_fp {
 /// is in little-endian `u64` limbs format.
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub struct Fp(pub(crate) blst_fp);
+pub struct Fp(pub blst_fp);
 
 // Coefficients for the Frobenius automorphism.
 pub(crate) const FROBENIUS_COEFF_FP2_C1: [Fp; 2] = [
