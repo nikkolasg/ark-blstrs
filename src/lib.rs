@@ -12,7 +12,7 @@ compile_error!("blstrs is only supported on little endian architectures");
 #[macro_use]
 mod macros;
 
-mod fp;
+pub mod fp;
 mod fp12;
 mod fp2;
 mod fp6;
@@ -38,11 +38,7 @@ mod tests;
 
 // export for benchmarking only
 #[cfg(feature = "__private_bench")]
-pub use crate::{
-    fp::{Fp, R},
-    fp12::Fp12,
-    fp2::Fp2,
-};
+pub use crate::{fp::Fp, fp12::Fp12, fp2::Fp2};
 
 use ff::Field;
 use group::prime::PrimeCurveAffine;
