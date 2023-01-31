@@ -254,7 +254,7 @@ impl Fp2 {
         out
     }
 
-    pub fn from_bytes_le(buff: [u8; 96]) -> CtOption<Self> {
+    pub fn from_bytes_le(buff: &[u8; 96]) -> CtOption<Self> {
         let (l1, l2): (&[u8; 48], &[u8; 48]) = unsafe {
             let p1 = std::slice::from_raw_parts(buff.as_ptr(), 48).as_ptr() as *const [u8; 48];
             let p2 =
@@ -357,7 +357,7 @@ mod tests {
         for _ in 0..100 {
             let a = Fp2::random(&mut rng);
             let buff =  a.to_bytes_le();
-            let b : Fp2 = Option::from(Fp2::from_bytes_le(buff)).expect("should be able to deserialize");
+            let b : Fp2 = Option::from(Fp2::from_bytes_le(&buff)).expect("should be able to deserialize");
             assert_eq!(a,b, "failed serialization/deserialization");
         }
     }
