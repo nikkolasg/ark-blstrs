@@ -13,6 +13,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use crate::{fp::Fp, fp2::Fp2, fp6::Fp6};
 
+const COEFF_SIZE: usize = 288;
 /// This represents an element $c_0 + c_1 w$ of $\mathbb{F}_{p^12} = \mathbb{F}_{p^6} / w^2 - v$.
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
@@ -27,9 +28,29 @@ impl fmt::Debug for Fp12 {
     }
 }
 
+impl Ord for Fp12 {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        match self.c0().cmp(&other.c0()) {
+            core::cmp::Ordering::Equal => self.c1().cmp(&other.c1()),
+            res => res,
+        }
+    }
+}
+impl PartialOrd for Fp12 {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl fmt::Display for Fp12 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?} + {:?}*u", self.c0(), self.c1())
+    }
+}
+
+impl From<u64> for Fp12 {
+    fn from(val: u64) -> Fp12 {
+        Fp12::new(Fp6::from(val), Fp6::zero())
     }
 }
 
@@ -253,6 +274,26 @@ impl Fp12 {
     /// Constructs an element of `Fp12`.
     pub const fn new(c0: Fp6, c1: Fp6) -> Fp12 {
         Fp12(blst_fp12 { fp6: [c0.0, c1.0] })
+    }
+
+    pub fn to_bytes_le(&self) -> [u8; 576] {
+        let mut out = [0u8; 576];
+        out[0..COEFF_SIZE].copy_from_slice(self.c0().to_bytes_le()[..].as_ref());
+        out[COEFF_SIZE..COEFF_SIZE * 2].copy_from_slice(self.c1().to_bytes_le()[..].as_ref());
+        out
+    }
+
+    pub fn from_bytes_le(buff: &[u8; 576]) -> CtOption<Self> {
+        let (l1, l2): (&[u8; COEFF_SIZE], &[u8; COEFF_SIZE]) = unsafe {
+            let p1 = std::slice::from_raw_parts(buff.as_ptr(), COEFF_SIZE).as_ptr()
+                as *const [u8; COEFF_SIZE];
+            let p2 = std::slice::from_raw_parts(buff.as_ptr().add(COEFF_SIZE), COEFF_SIZE).as_ptr()
+                as *const [u8; COEFF_SIZE];
+            (&*p1, &*p2)
+        };
+        let c0 = Fp6::from_bytes_le(l1);
+        let c1 = Fp6::from_bytes_le(l2);
+        c0.and_then(|e0| c1.map(|e1| Self::new(e0, e1)))
     }
 
     pub fn frobenius_map(&mut self, power: usize) {
