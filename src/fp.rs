@@ -608,7 +608,7 @@ impl Fp {
 
     /// Constructs an element of `Fp` from a little-endian array of limbs without checking that it
     /// is canonical and without converting it to Montgomery form (i.e. without multiplying by `R`).
-    pub fn from_raw_unchecked(l: [u64; 6]) -> Fp {
+    pub const fn from_raw_unchecked(l: [u64; 6]) -> Fp {
         Fp(blst_fp { l })
     }
 
