@@ -1,5 +1,6 @@
 // Requires the caller to manually implement `Add<&rhs, Output = output> for &lhs` and
 // `Sub<&rhs, Output = output> for &lhs`.
+#[macro_export]
 macro_rules! impl_add_sub {
     ($t:ident) => {
         impl_add_sub!($t, $t, $t);
@@ -66,6 +67,7 @@ macro_rules! impl_add_sub {
 
 // Requires the caller to manually implement `AddAssign<&rhs> for lhs` and
 // `SubAssign<&rhs> for lhs`.
+#[macro_export]
 macro_rules! impl_add_sub_assign {
     ($t:ident) => {
         impl_add_sub_assign!($t, $t);
@@ -88,6 +90,7 @@ macro_rules! impl_add_sub_assign {
 }
 
 // Requires the caller to manually implement `Mul<&rhs, Output = output> for &lhs`.
+#[macro_export]
 macro_rules! impl_mul {
     ($t:ident) => {
         impl_mul!($t, $t, $t);
@@ -126,6 +129,7 @@ macro_rules! impl_mul {
 }
 
 // Requires the caller to manually implement `MulAssign<&rhs> for lhs`.
+#[macro_export]
 macro_rules! impl_mul_assign {
     ($t:ident) => {
         impl_mul_assign!($t, $t);
@@ -140,6 +144,7 @@ macro_rules! impl_mul_assign {
     };
 }
 
+#[macro_export]
 macro_rules! encoded_point_delegations {
     ($t:ident) => {
         impl AsRef<[u8]> for $t {
@@ -178,6 +183,7 @@ macro_rules! encoded_point_delegations {
     };
 } // encoded_point_delegations
 
+#[macro_export]
 macro_rules! impl_add {
     ($t:ident) => {
         impl_add!($t, $t, $t);
