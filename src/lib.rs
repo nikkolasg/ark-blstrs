@@ -12,7 +12,7 @@ compile_error!("blstrs is only supported on little endian architectures");
 #[macro_use]
 mod macros;
 
-mod fp;
+pub mod fp;
 mod fp12;
 mod fp2;
 mod fp6;
@@ -20,7 +20,7 @@ mod g1;
 mod g2;
 mod gt;
 mod pairing;
-mod scalar;
+pub mod scalar;
 mod traits;
 
 pub use g1::{G1Affine, G1Compressed, G1Projective, G1Uncompressed};
@@ -38,7 +38,7 @@ mod tests;
 
 // export for benchmarking only
 #[cfg(feature = "__private_bench")]
-pub use crate::{fp::Fp, fp12::Fp12, fp2::Fp2};
+pub use crate::{fp::Fp, fp12::Fp12, fp2::Fp2, fp6::Fp6};
 
 use ff::Field;
 use group::prime::PrimeCurveAffine;
@@ -59,6 +59,22 @@ impl Engine for Bls12 {
     fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
         pairing(p, q)
     }
+}
+
+// NOTE vmx 2023-02-08: This will no longer be needed to be public in case the arkworks
+// implementation is moved within this crate.
+pub fn miller_loop_lines(out: &mut blst::blst_fp12, q: &G2Prepared, p: &G1Affine) {
+    unsafe {
+        blst::blst_miller_loop_lines(out, q.lines.as_ptr(), &p.0);
+    }
+}
+
+// NOTE vmx 2023-02-08: This will no longer be needed to be public in case the arkworks
+// implementation is moved within this crate.
+pub fn final_exponentiation(result: &fp12::Fp12) -> fp12::Fp12 {
+    let mut out = blst::blst_fp12::default();
+    unsafe { blst::blst_final_exp(&mut out, &result.0) };
+    out.into()
 }
 
 impl MultiMillerLoop for Bls12 {

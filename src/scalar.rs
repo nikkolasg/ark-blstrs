@@ -25,7 +25,7 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 pub struct Scalar(pub(crate) blst_fr);
 
 // GENERATOR = 7 (multiplicative generator of r-1 order, that is also quadratic nonresidue)
-const GENERATOR: Scalar = Scalar(blst_fr {
+pub const GENERATOR: Scalar = Scalar(blst_fr {
     l: [
         0x0000_000e_ffff_fff1,
         0x17e3_63d3_0018_9c0f,
@@ -36,7 +36,7 @@ const GENERATOR: Scalar = Scalar(blst_fr {
 
 // Little-endian non-Montgomery form not reduced mod p.
 #[allow(dead_code)]
-const MODULUS: [u64; 4] = [
+pub const MODULUS: [u64; 4] = [
     0xffff_ffff_0000_0001,
     0x53bd_a402_fffe_5bfe,
     0x3339_d808_09a1_d805,
@@ -63,7 +63,7 @@ const MODULUS_REPR: [u8; 32] = [
 ];
 
 // `2^S` root of unity in little-endian Montgomery form.
-const ROOT_OF_UNITY: Scalar = Scalar(blst_fr {
+pub const ROOT_OF_UNITY: Scalar = Scalar(blst_fr {
     l: [
         0xb9b5_8d8c_5f0e_466a,
         0x5b1b_4c80_1819_d7ec,
@@ -72,14 +72,14 @@ const ROOT_OF_UNITY: Scalar = Scalar(blst_fr {
     ],
 });
 
-const ZERO: Scalar = Scalar(blst_fr { l: [0, 0, 0, 0] });
+pub const ZERO: Scalar = Scalar(blst_fr { l: [0, 0, 0, 0] });
 
 /// `R = 2^256 mod q` in little-endian Montgomery form which is equivalent to 1 in little-endian
 /// non-Montgomery form.
 ///
 /// sage> mod(2^256, 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001)
 /// sage> 0x1824b159acc5056f998c4fefecbc4ff55884b7fa0003480200000001fffffffe
-const R: Scalar = Scalar(blst_fr {
+pub const R: Scalar = Scalar(blst_fr {
     l: [
         0x0000_0001_ffff_fffe,
         0x5884_b7fa_0003_4802,
@@ -599,6 +599,13 @@ impl Scalar {
         unsafe { blst_fr_from_scalar(&mut out, &raw) };
 
         CtOption::new(Scalar(out), is_some)
+    }
+
+    /// Constructs an element of `Scalar` from a little-endian array of limbs without checking
+    /// that it is canonical and without converting it to Montgomery form (i.e. without
+    /// multiplying by `R`).
+    pub const fn from_raw_unchecked(l: [u64; 4]) -> Self {
+        Scalar(blst_fr { l })
     }
 
     #[allow(clippy::match_like_matches_macro)]

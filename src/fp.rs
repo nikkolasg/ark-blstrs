@@ -15,7 +15,7 @@ use crate::fp2::Fp2;
 
 // Little-endian non-Montgomery form.
 #[allow(dead_code)]
-const MODULUS: [u64; 6] = [
+pub const MODULUS: [u64; 6] = [
     0xb9fe_ffff_ffff_aaab,
     0x1eab_fffe_b153_ffff,
     0x6730_d2a0_f6b0_f624,
@@ -25,7 +25,7 @@ const MODULUS: [u64; 6] = [
 ];
 
 // Little-endian non-Montgomery form.
-const MODULUS_REPR: [u8; 48] = [
+pub const MODULUS_REPR: [u8; 48] = [
     0xab, 0xaa, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xb9, 0xff, 0xff, 0x53, 0xb1, 0xfe, 0xff, 0xab, 0x1e,
     0x24, 0xf6, 0xb0, 0xf6, 0xa0, 0xd2, 0x30, 0x67, 0xbf, 0x12, 0x85, 0xf3, 0x84, 0x4b, 0x77, 0x64,
     0xd7, 0xac, 0x4b, 0x43, 0xb6, 0xa7, 0x1b, 0x4b, 0x9a, 0xe6, 0x7f, 0x39, 0xea, 0x11, 0x01, 0x1a,
@@ -64,7 +64,7 @@ const R2: Fp = Fp(blst_fp {
 /// is in little-endian `u64` limbs format.
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub struct Fp(pub(crate) blst_fp);
+pub struct Fp(pub blst_fp);
 
 // Coefficients for the Frobenius automorphism.
 pub(crate) const FROBENIUS_COEFF_FP2_C1: [Fp; 2] = [
@@ -294,6 +294,14 @@ impl From<u64> for Fp {
     fn from(val: u64) -> Fp {
         let mut repr = [0u8; 48];
         repr[..8].copy_from_slice(&val.to_le_bytes());
+        Self::from_bytes_le(&repr).unwrap()
+    }
+}
+
+impl From<u128> for Fp {
+    fn from(val: u128) -> Fp {
+        let mut repr = [0u8; 48];
+        repr[..16].copy_from_slice(&val.to_le_bytes());
         Self::from_bytes_le(&repr).unwrap()
     }
 }
@@ -600,7 +608,7 @@ impl Fp {
 
     /// Constructs an element of `Fp` from a little-endian array of limbs without checking that it
     /// is canonical and without converting it to Montgomery form (i.e. without multiplying by `R`).
-    pub fn from_raw_unchecked(l: [u64; 6]) -> Fp {
+    pub const fn from_raw_unchecked(l: [u64; 6]) -> Fp {
         Fp(blst_fp { l })
     }
 

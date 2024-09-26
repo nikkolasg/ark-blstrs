@@ -6,6 +6,7 @@ use core::{
     fmt,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
+use std::cmp::Ordering;
 
 use crate::{
     fp::{Fp, FROBENIUS_COEFF_FP6_C1, FROBENIUS_COEFF_FP6_C2},
@@ -16,10 +17,12 @@ use ff::Field;
 use rand_core::RngCore;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 
+// size of each of the three coefficients for Fp6
+const COEFF_SIZE: usize = 96;
 /// This represents an element $c_0 + c_1 v + c_2 v^2$ of $\mathbb{F}_{p^6} = \mathbb{F}_{p^2} / v^3 - u - 1$.
 #[derive(Copy, Clone)]
 #[repr(transparent)]
-pub struct Fp6(pub(crate) blst_fp6);
+pub struct Fp6(pub blst_fp6);
 
 impl fmt::Debug for Fp6 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -40,6 +43,27 @@ impl fmt::Display for Fp6 {
             self.c1(),
             self.c2()
         )
+    }
+}
+
+impl Ord for Fp6 {
+    #[inline(always)]
+    fn cmp(&self, other: &Fp6) -> Ordering {
+        match self.c2().cmp(&other.c2()) {
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => match self.c1().cmp(&other.c1()) {
+                Ordering::Greater => Ordering::Greater,
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal => self.c0().cmp(&other.c0()),
+            },
+        }
+    }
+}
+impl PartialOrd for Fp6 {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Fp6) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -372,6 +396,33 @@ impl Fp6 {
 
     pub fn c2(&self) -> Fp2 {
         Fp2(self.0.fp2[2])
+    }
+
+    pub fn to_bytes_le(&self) -> [u8; 288] {
+        let mut out = [0u8; COEFF_SIZE * 3];
+        let l1 = Fp2(self.0.fp2[0]).to_bytes_le();
+        let l2 = Fp2(self.0.fp2[1]).to_bytes_le();
+        let l3 = Fp2(self.0.fp2[2]).to_bytes_le();
+        out[..COEFF_SIZE].copy_from_slice(&l1[..]);
+        out[COEFF_SIZE..COEFF_SIZE * 2].copy_from_slice(&l2[..]);
+        out[COEFF_SIZE * 2..COEFF_SIZE * 3].copy_from_slice(&l3[..]);
+        out
+    }
+    pub fn from_bytes_le(buff: &[u8; 288]) -> CtOption<Self> {
+        let (l1, l2, l3): (&[u8; COEFF_SIZE], &[u8; COEFF_SIZE], &[u8; COEFF_SIZE]) = unsafe {
+            let p1 = std::slice::from_raw_parts(buff.as_ptr(), COEFF_SIZE).as_ptr()
+                as *const [u8; COEFF_SIZE];
+            let p2 = std::slice::from_raw_parts(buff.as_ptr().add(COEFF_SIZE), COEFF_SIZE).as_ptr()
+                as *const [u8; COEFF_SIZE];
+
+            let p3 = std::slice::from_raw_parts(buff.as_ptr().add(COEFF_SIZE*2), COEFF_SIZE).as_ptr()
+                as *const [u8; COEFF_SIZE];
+            (&*p1, &*p2, &*p3)
+        };
+        let c0 = Fp2::from_bytes_le(l1);
+        let c1 = Fp2::from_bytes_le(l2);
+        let c2 = Fp2::from_bytes_le(l3);
+        c0.and_then(|e0| c1.and_then(|e1| c2.map(|e2| Self::new(e0, e1, e2))))
     }
 
     /// Multiply by quadratic nonresidue v.
